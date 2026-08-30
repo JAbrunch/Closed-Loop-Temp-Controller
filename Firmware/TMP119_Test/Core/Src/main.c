@@ -18,6 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "tmp119.h"
+#include "heater.h"
+#include "controller.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
@@ -31,7 +34,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SAMPLE_INTERVAL_MS 30000
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,7 +59,6 @@ static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-uint32_t DutyToCCR(float duty);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -98,13 +99,10 @@ int main(void)
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
-  volatile HAL_StatusTypeDef status;
-  uint8_t temp_data[2] = {0};
-  int16_t raw_temp = 0;
+  HAL_StatusTypeDef status;
   float temperature_c = 0.0f;
   char uart_buffer[128];
   int buffer_length;
-  uint32_t ccr = 0;
   uint32_t elapsed_s = 0;
 
 
@@ -112,13 +110,13 @@ int main(void)
 
   float Kp = 40.0f;
   float Ki = 0.20f;
-  float integral = 0;
   float dt = 1.0f;
-  float error = 0.0f;
-  float duty = 0.0f;
 
-  float I_term = 0.0f;
-  float P_term = 0.0f;
+  PI_Controller controller;
+
+  PI_Controller_Init(&controller, Kp, Ki, dt);
+
+  float duty = 0.0f;
 
   status = HAL_I2C_IsDeviceReady(
       &hi2c1,
@@ -143,64 +141,23 @@ int main(void)
 
 	  elapsed_s = (HAL_GetTick() - start_time) / 1000;
 
-	  status = HAL_I2C_Mem_Read(
-	      &hi2c1,
-	      TMP119_I2C_ADDR << 1,
-	      TMP119_TEMP_REG,
-	      I2C_MEMADD_SIZE_8BIT,
-	      temp_data,
-	      2,
-	      100
-	  );
+	  status = TMP119_ReadTemperature(&hi2c1, &temperature_c);
 
 	  if (status == HAL_OK) {
 
-		  // Obtains the temperature from the TMP119 sensor
-		  raw_temp = (int16_t)(((uint16_t)temp_data[0] << 8) | temp_data[1]);
-		  temperature_c = raw_temp * 0.0078125f;
+		  duty = PI_Controller_Update(&controller, setpoint, temperature_c);
 
-		  // Sets the error based on the difference between the desired temperature and current temperature
-		  error = setpoint - temperature_c;
-
-		  P_term = Kp * error;
-
-		  if (P_term < 100.0f){
-			  integral = integral + error * dt;
-		  }
-
-		  I_term = Ki * integral;
-
-		  duty = P_term + I_term;
-
-		  // Clamps the duty cycle between 0-100
-		  if (duty > 100.0f)
-			  duty = 100.0f;
-		  if (duty < 0.0f)
-			  duty = 0.0f;
-
-		  // Converts the duty cycle to a CCR value
-		  ccr = DutyToCCR(duty);
-
-		  // Updates the PWM comparison value
-		  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, ccr);
-//		  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+		  Heater_SetDuty(&htim2, TIM_CHANNEL_1, duty);
 
 		  buffer_length = snprintf(
 		      uart_buffer,
 		      sizeof(uart_buffer),
-		      "%u,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.2f,%.2f\r\n",
+		      "%u,%.2f,%.2f,%.2f\r\n",
 		      elapsed_s,
 		      temperature_c,
 		      setpoint,
-		      error,
-		      duty,
-		      Kp,
-		      Ki,
-		      P_term,
-		      I_term
+		      duty
 		  );
-
-//		  buffer_length = snprintf(uart_buffer, sizeof(uart_buffer), "Temperature: %.2f\r\n", temperature_c);
 
 		  HAL_UART_Transmit(&huart2, uart_buffer, buffer_length, 100);
 
@@ -416,16 +373,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-uint32_t DutyToCCR(float duty){
-
-	  if (duty >= 100.0f){
-		  return 1000;
-	  } else {
-		  return (uint32_t)(duty * 1000.0f) / 100.0f;
-	  }
-
-  }
 
 /* USER CODE END 4 */
 
