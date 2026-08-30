@@ -104,12 +104,21 @@ int main(void)
   float temperature_c = 0.0f;
   char uart_buffer[128];
   int buffer_length;
-  float setpoint = 35.0f;
-  float Kp = 40.0f;
-  float error = 0.0f;
-  float duty = 0.0f;
   uint32_t ccr = 0;
   uint32_t elapsed_s = 0;
+
+
+  float setpoint = 35.0f;
+
+  float Kp = 40.0f;
+  float Ki = 0.20f;
+  float integral = 0;
+  float dt = 1.0f;
+  float error = 0.0f;
+  float duty = 0.0f;
+
+  float I_term = 0.0f;
+  float P_term = 0.0f;
 
   status = HAL_I2C_IsDeviceReady(
       &hi2c1,
@@ -152,7 +161,16 @@ int main(void)
 
 		  // Sets the error based on the difference between the desired temperature and current temperature
 		  error = setpoint - temperature_c;
-		  duty = Kp * error;
+
+		  P_term = Kp * error;
+
+		  if (P_term < 100.0f){
+			  integral = integral + error * dt;
+		  }
+
+		  I_term = Ki * integral;
+
+		  duty = P_term + I_term;
 
 		  // Clamps the duty cycle between 0-100
 		  if (duty > 100.0f)
@@ -167,7 +185,21 @@ int main(void)
 		  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, ccr);
 //		  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
 
-		  buffer_length = snprintf(uart_buffer, sizeof(uart_buffer), "%u,%.2f,%.2f,%.2f,%.2f,%.2f\r\n", elapsed_s, temperature_c, setpoint, error, duty, Kp);
+		  buffer_length = snprintf(
+		      uart_buffer,
+		      sizeof(uart_buffer),
+		      "%u,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.2f,%.2f\r\n",
+		      elapsed_s,
+		      temperature_c,
+		      setpoint,
+		      error,
+		      duty,
+		      Kp,
+		      Ki,
+		      P_term,
+		      I_term
+		  );
+
 //		  buffer_length = snprintf(uart_buffer, sizeof(uart_buffer), "Temperature: %.2f\r\n", temperature_c);
 
 		  HAL_UART_Transmit(&huart2, uart_buffer, buffer_length, 100);
@@ -297,7 +329,7 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 500;
+  sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
