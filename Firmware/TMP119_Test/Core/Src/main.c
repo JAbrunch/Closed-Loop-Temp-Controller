@@ -57,7 +57,7 @@ static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-uint32_t DutyToCCR(uint32_t duty);
+uint32_t DutyToCCR(float duty);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -73,14 +73,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
-  uint32_t DutyToCCR(uint32_t duty){
-
-	  if (duty >= 100){
-		  return 1000;
-	  } else return (duty * 1000) / 100;
-
-  }
 
   /* USER CODE END 1 */
 
@@ -110,8 +102,14 @@ int main(void)
   uint8_t temp_data[2] = {0};
   int16_t raw_temp = 0;
   float temperature_c = 0.0f;
-  char uart_buffer[32];
+  char uart_buffer[128];
   int buffer_length;
+  float setpoint = 35.0f;
+  float Kp = 40.0f;
+  float error = 0.0f;
+  float duty = 0.0f;
+  uint32_t ccr = 0;
+  uint32_t elapsed_s = 0;
 
   status = HAL_I2C_IsDeviceReady(
       &hi2c1,
@@ -125,55 +123,62 @@ int main(void)
 		  TIM_CHANNEL_1
   );
 
-  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+  uint32_t start_time = HAL_GetTick();
 
-  uint32_t experiment_start_time = HAL_GetTick();
-  uint32_t previous_sample_time = 0;
-  bool first_sample = true;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  uint32_t current_time = HAL_GetTick();
-	  uint32_t elapsed_time = current_time - experiment_start_time;
-	  uint32_t elapsed_seconds = elapsed_time / 1000;
 
-	  if (first_sample ||
-			  current_time - previous_sample_time >= SAMPLE_INTERVAL_MS){
+	  elapsed_s = (HAL_GetTick() - start_time) / 1000;
 
-		  status = HAL_I2C_Mem_Read(
-			  &hi2c1,
-			  TMP119_I2C_ADDR << 1,
-			  TMP119_TEMP_REG,
-			  I2C_MEMADD_SIZE_8BIT,
-			  temp_data,
-			  2,
-			  100
-		  );
+	  status = HAL_I2C_Mem_Read(
+	      &hi2c1,
+	      TMP119_I2C_ADDR << 1,
+	      TMP119_TEMP_REG,
+	      I2C_MEMADD_SIZE_8BIT,
+	      temp_data,
+	      2,
+	      100
+	  );
 
-		  if (status == HAL_OK) {
+	  if (status == HAL_OK) {
 
-			  raw_temp = (int16_t)(((uint16_t)temp_data[0] << 8) | temp_data[1]);
+		  // Obtains the temperature from the TMP119 sensor
+		  raw_temp = (int16_t)(((uint16_t)temp_data[0] << 8) | temp_data[1]);
+		  temperature_c = raw_temp * 0.0078125f;
 
-			  temperature_c = raw_temp * 0.0078125f;
+		  // Sets the error based on the difference between the desired temperature and current temperature
+		  error = setpoint - temperature_c;
+		  duty = Kp * error;
 
-			  buffer_length = snprintf(uart_buffer, sizeof(uart_buffer), "100->0,%u,%.2f\r\n", elapsed_seconds, temperature_c);
+		  // Clamps the duty cycle between 0-100
+		  if (duty > 100.0f)
+			  duty = 100.0f;
+		  if (duty < 0.0f)
+			  duty = 0.0f;
 
-			  HAL_UART_Transmit(&huart2, uart_buffer, buffer_length, 100);
+		  // Converts the duty cycle to a CCR value
+		  ccr = DutyToCCR(duty);
 
-			  first_sample = false;
-			  previous_sample_time = current_time;
+		  // Updates the PWM comparison value
+		  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, ccr);
+//		  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
 
-		  }
-	   }
+		  buffer_length = snprintf(uart_buffer, sizeof(uart_buffer), "%u,%.2f,%.2f,%.2f,%.2f,%.2f\r\n", elapsed_s, temperature_c, setpoint, error, duty, Kp);
+//		  buffer_length = snprintf(uart_buffer, sizeof(uart_buffer), "Temperature: %.2f\r\n", temperature_c);
 
-	  HAL_Delay(500);
-    /* USER CODE END WHILE */
+		  HAL_UART_Transmit(&huart2, uart_buffer, buffer_length, 100);
 
-    /* USER CODE BEGIN 3 */
+		/* USER CODE END WHILE */
+	  }
+		/* USER CODE BEGIN 3 */
+
+	  HAL_Delay(1000);
   }
+
   /* USER CODE END 3 */
 }
 
@@ -379,6 +384,16 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+uint32_t DutyToCCR(float duty){
+
+	  if (duty >= 100.0f){
+		  return 1000;
+	  } else {
+		  return (uint32_t)(duty * 1000.0f) / 100.0f;
+	  }
+
+  }
 
 /* USER CODE END 4 */
 
