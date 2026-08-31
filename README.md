@@ -220,7 +220,7 @@ However, proportional control alone could not eliminate the offset from the 35 Â
 
 `Kp = 40` was selected for subsequent PI-controller testing because it produced the strongest stable proportional response among the tested values while reducing steady-state error to approximately 1.1 Â°C.
 
-![P controller temperature response](MATLAB/P_Controller_Temperature_Response.png)
+![P controller temperature response](MATLAB/P_Controller_Temperature_Response_v2.png)
 
 ## PI Controller Tuning
 
