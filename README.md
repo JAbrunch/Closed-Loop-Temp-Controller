@@ -168,8 +168,10 @@ where:
 The resulting controller output is constrained to the physical actuator range:
 
 $$
-0\% \leq u[k] \leq 100\%
+0 \leq u[k] \leq 100
 $$
+
+where \(u[k]\) is expressed as PWM duty cycle in percent.
 
 ## Open-Loop Thermal Characterization
 
