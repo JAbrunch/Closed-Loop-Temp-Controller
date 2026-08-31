@@ -105,9 +105,8 @@ int main(void)
   int buffer_length;
   uint32_t elapsed_s = 0;
 
-
+  /* Closed-loop controller configuration. */
   float setpoint = 35.0f;
-
   float Kp = 40.0f;
   float Ki = 0.20f;
   float dt = 1.0f;
@@ -118,6 +117,9 @@ int main(void)
 
   float duty = 0.0f;
 
+  /* Verify communication with the temperature sensor before entering
+   * closed-loop operation.
+   */
   status = HAL_I2C_IsDeviceReady(
       &hi2c1,
       TMP119_I2C_ADDR << 1,
@@ -125,6 +127,7 @@ int main(void)
       100
   );
 
+  /* Start PWM generation with an initial compare value of zero. */
   status = HAL_TIM_PWM_Start(
 		  &htim2,
 		  TIM_CHANNEL_1
@@ -143,12 +146,14 @@ int main(void)
 
 	  status = TMP119_ReadTemperature(&hi2c1, &temperature_c);
 
-	  if (status == HAL_OK) {
-
+	  if (status == HAL_OK)
+	  {
+	      /* Execute one closed-loop temperature-control iteration. */
 		  duty = PI_Controller_Update(&controller, setpoint, temperature_c);
 
 		  Heater_SetDuty(&htim2, TIM_CHANNEL_1, duty);
 
+	      /* Stream validation data to the host PC for MATLAB analysis. */
 		  buffer_length = snprintf(
 		      uart_buffer,
 		      sizeof(uart_buffer),
